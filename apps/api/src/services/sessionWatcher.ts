@@ -13,7 +13,8 @@ export class SessionWatcher {
   }
 
   private scheduleNextRun(fastRetry = false) {
-    const delay = fastRetry ? 10000 : 60000;
+    // Fast retry: 10s if loading, normal: 30s for activity checks
+    const delay = fastRetry ? 10000 : 30000;
     this.timer = setTimeout(() => this.run(), delay);
   }
 
@@ -47,27 +48,42 @@ export class SessionWatcher {
     const timeSinceLastRun = now.getTime() - lastRun.getTime();
     const intervalMs = target.refreshInterval * 1000;
 
+    let shouldDoActivity = false;
     let shouldReload = false;
 
     if (target.status === 'LOADING') {
+      // While loading, just check DOM status — no activity needed
+      shouldDoActivity = false;
       shouldReload = false;
     } else if (intervalMs > 0) {
       if (timeSinceLastRun < intervalMs) {
         return false;
       }
-      shouldReload = true;
+      // Instead of reloading, simulate human activity to keep session alive
+      shouldDoActivity = true;
+      shouldReload = false;
     } else {
-      // For intervalMs === 0, we only check every minute (when fastRetry is false)
-      // To avoid spamming checks every 10s when another target is loading:
-      if (timeSinceLastRun < 60000) {
+      // For intervalMs === 0, just monitor every cycle without activity
+      if (timeSinceLastRun < 30000) {
          return false;
       }
+      shouldDoActivity = false;
       shouldReload = false;
     }
 
-    console.log(`Checking target: ${target.url} (Reload: ${shouldReload})`);
-
     try {
+      // Step 1: Simulate human activity (if needed) to keep session alive
+      if (shouldDoActivity) {
+        const activityResult = await browserService.simulateHumanActivity(target.id);
+        if (activityResult.success) {
+          console.log(`🤖 Activity simulated for ${target.url}`);
+        } else {
+          console.warn(`⚠️ Activity failed for ${target.url}: ${activityResult.reason}`);
+        }
+      }
+
+      // Step 2: Check session status (without reload)
+      console.log(`Checking target: ${target.url} (Activity: ${shouldDoActivity}, Reload: ${shouldReload})`);
       const result = await browserService.checkSession(target.id, target.url, target.cookies, shouldReload);
 
       if (result.isExpired) {
