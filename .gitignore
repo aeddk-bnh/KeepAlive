@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+dev.db
+.env
+.DS_Store
+cookies.json
+url.txt

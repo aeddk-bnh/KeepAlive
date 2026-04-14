@@ -1,0 +1,548 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+
+const API_URL = 'http://18.141.180.100:3001/api';
+
+// --- Types ---
+interface Profile {
+  id: string;
+  name: string;
+  updatedAt: string;
+}
+
+interface ActivityLog {
+  id: string;
+  level: 'INFO' | 'WARN' | 'ERROR';
+  message: string;
+  timestamp: string;
+}
+
+interface Target {
+  id: string;
+  url: string;
+  profileId: string;
+  profile?: { id: string; name: string };
+  refreshInterval: number;
+  isActive: boolean;
+  status: 'ACTIVE' | 'EXPIRED' | 'ERROR' | 'IDLE';
+  lastRun?: string;
+  logs: ActivityLog[];
+}
+
+interface Toast {
+  id: number;
+  message: string;
+  type: 'success' | 'error' | 'info';
+}
+
+// --- Icons (SVG Components) ---
+const IconPlus = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>;
+const IconUpload = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>;
+const IconTrash = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
+const IconRefresh = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>;
+const IconPause = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>;
+const IconPlay = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>;
+const IconX = () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"/></svg>;
+const IconGlobe = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>;
+const IconClock = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>;
+
+// --- Components ---
+
+const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[], removeToast: (id: number) => void }) => (
+  <div className="fixed bottom-6 right-6 z-[200] space-y-3 pointer-events-none">
+    {toasts.map(toast => (
+      <div
+        key={toast.id}
+        className={`pointer-events-auto flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl border transition-all duration-300 transform translate-x-0 ${
+          toast.type === 'success' ? 'bg-emerald-600 border-emerald-500 text-white' :
+          toast.type === 'error' ? 'bg-rose-600 border-rose-500 text-white' :
+          'bg-slate-800 border-slate-700 text-white'
+        }`}
+      >
+        <span className="font-bold text-sm">{toast.message}</span>
+        <button onClick={() => removeToast(toast.id)} className="opacity-70 hover:opacity-100"><IconX /></button>
+      </div>
+    ))}
+  </div>
+);
+
+const StatCard = ({ title, value, colorClass, icon }: any) => (
+  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 group">
+    <div className="flex justify-between items-start">
+      <div>
+        <p className="text-slate-400 text-xs font-black uppercase tracking-widest mb-1 group-hover:text-slate-500 transition-colors">{title}</p>
+        <p className={`text-3xl font-black ${colorClass}`}>{value}</p>
+      </div>
+      <div className={`p-3 rounded-2xl bg-slate-50 text-slate-400 group-hover:bg-white group-hover:shadow-inner transition-all`}>
+        {icon}
+      </div>
+    </div>
+  </div>
+);
+
+export default function App() {
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [activeTab, setActiveTab] = useState<'targets' | 'profiles'>('targets');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const [newTarget, setNewTarget] = useState({ url: '', profileId: '', refreshInterval: 60 });
+  const [importName, setImportName] = useState('');
+  const [importError, setImportError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const showToast = (message: string, type: Toast['type'] = 'info') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => removeToast(id), 5000);
+  };
+
+  const removeToast = (id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+
+  const fetchData = async () => {
+    try {
+      const [tRes, pRes] = await Promise.all([
+        fetch(`${API_URL}/targets`),
+        fetch(`${API_URL}/profiles`)
+      ]);
+      if (tRes.ok) setTargets(await tRes.json());
+      if (pRes.ok) setProfiles(await pRes.json());
+    } catch (err) {
+      console.error('Error fetching data:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const addTarget = async () => {
+    if (!newTarget.url || !newTarget.profileId) {
+      showToast('Please fill all fields', 'error');
+      return;
+    }
+    try {
+      const response = await fetch(`${API_URL}/targets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTarget)
+      });
+      if (response.ok) {
+        showToast('Target added successfully!', 'success');
+        setShowAddModal(false);
+        fetchData();
+      } else {
+        showToast('Failed to add target', 'error');
+      }
+    } catch (err) {
+      showToast('Network error', 'error');
+    }
+  };
+
+  const toggleTarget = async (id: string, currentStatus: boolean) => {
+    try {
+      const response = await fetch(`${API_URL}/targets/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !currentStatus })
+      });
+      if (response.ok) {
+        showToast(`Target ${!currentStatus ? 'activated' : 'paused'}`, 'info');
+        fetchData();
+      }
+    } catch (err) {
+      showToast('Action failed', 'error');
+    }
+  };
+
+  const deleteTarget = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this target?')) return;
+    try {
+      const response = await fetch(`${API_URL}/targets/${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        showToast('Target deleted', 'success');
+        fetchData();
+      }
+    } catch (err) {
+      showToast('Delete failed', 'error');
+    }
+  };
+
+  const deleteProfile = async (id: string) => {
+    if (!confirm('Deleting this profile will also delete associated targets. Continue?')) return;
+    try {
+      const response = await fetch(`${API_URL}/profiles/${id}`, { method: 'DELETE' });
+      if (response.ok) {
+        showToast('Profile deleted', 'success');
+        fetchData();
+      }
+    } catch (err) {
+      showToast('Delete failed', 'error');
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result as string;
+        JSON.parse(content);
+
+        const response = await fetch(`${API_URL}/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: importName || file.name.replace('.json', ''),
+            cookies: content
+          })
+        });
+
+        if (response.ok) {
+          showToast('Profile imported successfully!', 'success');
+          setShowImportModal(false);
+          setImportName('');
+          fetchData();
+        } else {
+          setImportError('Failed to save profile to server');
+        }
+      } catch (err) {
+        setImportError('Invalid JSON file format');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const stats = useMemo(() => ({
+    total: targets.length,
+    active: targets.filter(t => t.status === 'ACTIVE').length,
+    expired: targets.filter(t => t.status === 'EXPIRED').length,
+    profiles: profiles.length
+  }), [targets, profiles]);
+
+  const getStatusInfo = (status: string, isActive: boolean) => {
+    if (!isActive) return { label: 'PAUSED', color: 'bg-slate-100 text-slate-500 ring-slate-200' };
+    switch (status) {
+      case 'ACTIVE': return { label: 'ACTIVE', color: 'bg-emerald-50 text-emerald-600 ring-emerald-200 shadow-emerald-50' };
+      case 'EXPIRED': return { label: 'EXPIRED', color: 'bg-rose-50 text-rose-600 ring-rose-200 shadow-rose-50 animate-pulse' };
+      case 'ERROR': return { label: 'ERROR', color: 'bg-amber-50 text-amber-600 ring-amber-200' };
+      default: return { label: 'IDLE', color: 'bg-indigo-50 text-indigo-500 ring-indigo-100' };
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FDFDFF] text-slate-900 font-sans selection:bg-indigo-100 pb-20">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+      <div className="max-w-7xl mx-auto px-6 py-10">
+        {/* Header Section */}
+        <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-12 gap-8">
+          <div className="flex items-center gap-5">
+            <div className="w-14 h-14 bg-gradient-to-br from-indigo-600 to-violet-700 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-200 ring-4 ring-indigo-50">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            </div>
+            <div>
+              <h1 className="text-4xl font-black tracking-tight bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">KeepAlive</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <p className="text-slate-400 font-bold text-xs uppercase tracking-widest">System Operational • v1.0.0</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-4 w-full sm:w-auto">
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-6 py-4 bg-white border border-slate-200 text-slate-700 rounded-2xl font-bold hover:border-indigo-600 hover:text-indigo-600 transition-all shadow-sm active:scale-95"
+            >
+              <IconUpload /> Import Cookie
+            </button>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-all active:scale-95"
+            >
+              <IconPlus /> Add Target
+            </button>
+          </div>
+        </header>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <StatCard title="Monitoring" value={stats.total} colorClass="text-slate-800" icon={<IconGlobe />} />
+          <StatCard title="Active" value={stats.active} colorClass="text-emerald-600" icon={<IconPlay />} />
+          <StatCard title="Expired" value={stats.expired} colorClass="text-rose-600" icon={<IconPause />} />
+          <StatCard title="Profiles" value={stats.profiles} colorClass="text-indigo-600" icon={<IconUpload />} />
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex gap-8 mb-8 border-b border-slate-100">
+          <button
+            onClick={() => setActiveTab('targets')}
+            className={`pb-4 px-2 font-black text-sm uppercase tracking-widest transition-all relative ${activeTab === 'targets' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+          >
+            Monitor Targets
+            {activeTab === 'targets' && <span className="absolute bottom-0 left-0 w-full h-1 bg-indigo-600 rounded-t-full"></span>}
+          </button>
+          <button
+            onClick={() => setActiveTab('profiles')}
+            className={`pb-4 px-2 font-black text-sm uppercase tracking-widest transition-all relative ${activeTab === 'profiles' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+          >
+            Cookie Profiles
+            {activeTab === 'profiles' && <span className="absolute bottom-0 left-0 w-full h-1 bg-indigo-600 rounded-t-full"></span>}
+          </button>
+        </div>
+
+        {/* Content Area */}
+        {activeTab === 'targets' ? (
+          <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+            {targets.map(target => {
+              const status = getStatusInfo(target.status, target.isActive);
+              return (
+                <div key={target.id} className="group bg-white rounded-[2rem] shadow-sm border border-slate-100 p-8 hover:shadow-2xl hover:border-indigo-100 transition-all duration-500 relative flex flex-col h-full">
+                  <div className="flex justify-between items-start mb-8">
+                    <span className={`px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase ring-1 shadow-sm ${status.color}`}>
+                      {status.label}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => toggleTarget(target.id, target.isActive)}
+                        title={target.isActive ? "Pause Target" : "Resume Target"}
+                        className={`p-2 rounded-xl transition-all ${target.isActive ? 'text-slate-300 hover:text-amber-500 hover:bg-amber-50' : 'text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                      >
+                        {target.isActive ? <IconPause /> : <IconPlay />}
+                      </button>
+                      <button
+                        onClick={() => deleteTarget(target.id)}
+                        className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                      >
+                        <IconTrash />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex-1">
+                    <h3 className="text-2xl font-black text-slate-800 break-all line-clamp-2 leading-tight mb-4 group-hover:text-indigo-700 transition-colors" title={target.url}>
+                      {target.url.replace(/^https?:\/\/(www\.)?/, '')}
+                    </h3>
+
+                    <div className="flex items-center gap-3 mb-8 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                      <div className="w-10 h-10 rounded-xl bg-white shadow-sm flex items-center justify-center text-indigo-500 font-bold">
+                        {target.profile?.name?.charAt(0).toUpperCase() || 'P'}
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Active Profile</p>
+                        <p className="text-sm font-bold text-slate-700">{target.profile?.name}</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 mb-8">
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-50 group-hover:bg-white group-hover:border-slate-100 transition-all">
+                        <div className="flex items-center gap-2 mb-1">
+                          <IconClock />
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Interval</p>
+                        </div>
+                        <p className="text-lg font-black text-slate-700">{target.refreshInterval}s</p>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-50 group-hover:bg-white group-hover:border-slate-100 transition-all">
+                        <div className="flex items-center gap-2 mb-1">
+                          <IconRefresh />
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Last Run</p>
+                        </div>
+                        <p className="text-lg font-black text-slate-700">{target.lastRun ? new Date(target.lastRun).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Waiting'}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-slate-50 mt-auto">
+                    <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-4 flex items-center justify-between">
+                      Activity Log
+                      <span className="w-2 h-2 rounded-full bg-slate-200"></span>
+                    </p>
+                    <div className="space-y-3">
+                      {target.logs?.map((log: any) => (
+                        <div key={log.id} className={`text-xs p-3 rounded-xl border ${
+                          log.level === 'ERROR' ? 'bg-rose-50/50 border-rose-100 text-rose-600' :
+                          log.level === 'WARN' ? 'bg-amber-50/50 border-amber-100 text-amber-600' :
+                          'bg-slate-50/50 border-slate-100 text-slate-500'
+                        } font-semibold transition-all hover:bg-white`}>
+                          <span className="opacity-40 mr-2 tabular-nums">{new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                          {log.message}
+                        </div>
+                      ))}
+                      {(!target.logs || target.logs.length === 0) && (
+                        <div className="py-4 text-center border-2 border-dashed border-slate-50 rounded-2xl">
+                          <p className="text-[10px] text-slate-300 font-bold uppercase italic tracking-widest">Awaiting activity...</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {targets.length === 0 && (
+              <div className="col-span-full py-32 bg-white rounded-[3rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center text-slate-300">
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                   <IconGlobe />
+                </div>
+                <p className="text-xl font-black text-slate-400">No targets being monitored</p>
+                <p className="text-sm font-medium mt-2">Add a URL to begin maintaining its session</p>
+                <button onClick={() => setShowAddModal(true)} className="mt-8 px-8 py-3 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all">Add First Target</button>
+              </div>
+            )}
+          </section>
+        ) : (
+          <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {profiles.map(profile => (
+              <div key={profile.id} className="group bg-white rounded-3xl shadow-sm border border-slate-100 p-8 hover:shadow-xl transition-all">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-indigo-600 text-2xl font-black ring-8 ring-indigo-50/50">
+                    {profile.name.charAt(0).toUpperCase()}
+                  </div>
+                  <button
+                    onClick={() => deleteProfile(profile.id)}
+                    className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+                <h3 className="text-xl font-black text-slate-800 mb-2">{profile.name}</h3>
+                <p className="text-sm text-slate-400 font-bold mb-6">Modified: {new Date(profile.updatedAt).toLocaleDateString()}</p>
+
+                <div className="flex items-center gap-2 py-3 px-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100">
+                   <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                   <span className="text-[10px] font-black uppercase tracking-widest">Active Session</span>
+                </div>
+              </div>
+            ))}
+            {profiles.length === 0 && (
+              <div className="col-span-full py-32 bg-white rounded-[3rem] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center text-slate-300">
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6">
+                   <IconUpload />
+                </div>
+                <p className="text-xl font-black text-slate-400">No cookie profiles found</p>
+                <p className="text-sm font-medium mt-2">Import a JSON cookie profile to start monitoring</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Modal: Import Profile */}
+        {showImportModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-6 z-[100] transition-opacity duration-300">
+            <div className="bg-white rounded-[2.5rem] shadow-2xl p-10 w-full max-w-lg border border-white/20 transform transition-transform duration-300 scale-100">
+              <div className="flex justify-between items-center mb-10">
+                <div>
+                  <h2 className="text-3xl font-black text-slate-800">Import Profile</h2>
+                  <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">Setup your session credentials</p>
+                </div>
+                <button onClick={() => setShowImportModal(false)} className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 hover:text-slate-600 rounded-xl transition-all"><IconX /></button>
+              </div>
+
+              <div className="space-y-8">
+                <div className="group">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 group-focus-within:text-indigo-600 transition-colors">Friendly Name</label>
+                  <input
+                    type="text"
+                    className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl px-5 py-4 focus:border-indigo-500 focus:bg-white transition-all outline-none font-bold text-slate-700 placeholder-slate-300"
+                    placeholder="e.g. Work Account"
+                    value={importName}
+                    onChange={e => setImportName(e.target.value)}
+                  />
+                </div>
+
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="group border-3 border-dashed border-slate-100 rounded-[2rem] p-12 text-center hover:border-indigo-500 hover:bg-indigo-50/30 transition-all cursor-pointer bg-slate-50/50"
+                >
+                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json" className="hidden" />
+                  <div className="w-20 h-20 bg-white shadow-xl rounded-3xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 text-indigo-600">
+                    <IconUpload />
+                  </div>
+                  <p className="text-lg font-black text-slate-700">Upload Cookies</p>
+                  <p className="text-xs text-slate-400 mt-2 font-bold">Drop your JSON file here or click to browse</p>
+                </div>
+
+                {importError && (
+                  <div className="flex items-center gap-3 p-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 animate-in slide-in-from-top-4">
+                    <IconX />
+                    <p className="text-xs font-black uppercase tracking-wider">{importError}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-10 pt-8 border-t border-slate-50 flex gap-4">
+                <button onClick={() => setShowImportModal(false)} className="flex-1 py-4 bg-slate-50 text-slate-400 rounded-2xl font-bold hover:bg-slate-100 transition-all">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Add Target */}
+        {showAddModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-6 z-[100] animate-in fade-in duration-300">
+            <div className="bg-white rounded-[2.5rem] shadow-2xl p-10 w-full max-w-lg border border-white/20 transform animate-in zoom-in-95 duration-300">
+              <div className="flex justify-between items-center mb-10">
+                <div>
+                  <h2 className="text-3xl font-black text-slate-800">New Target</h2>
+                  <p className="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">Configure your session monitor</p>
+                </div>
+                <button onClick={() => setShowAddModal(false)} className="w-10 h-10 flex items-center justify-center bg-slate-50 text-slate-400 hover:text-slate-600 rounded-xl transition-all"><IconX /></button>
+              </div>
+
+              <div className="space-y-8">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Target URL</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-300"><IconGlobe /></div>
+                    <input
+                      type="text"
+                      className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl pl-12 pr-5 py-4 focus:border-indigo-500 focus:bg-white transition-all outline-none font-bold text-slate-700 placeholder-slate-300 shadow-inner"
+                      placeholder="https://example.com"
+                      onChange={e => setNewTarget({...newTarget, url: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Select Profile</label>
+                  <select
+                    className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl px-5 py-4 focus:border-indigo-500 focus:bg-white transition-all outline-none font-bold text-slate-700 appearance-none shadow-inner"
+                    onChange={e => setNewTarget({...newTarget, profileId: e.target.value})}
+                  >
+                    <option value="">Choose a profile...</option>
+                    {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Interval (Seconds)</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-300"><IconClock /></div>
+                    <input
+                      type="number"
+                      className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl pl-12 pr-5 py-4 focus:border-indigo-500 focus:bg-white transition-all outline-none font-bold text-slate-700 shadow-inner"
+                      defaultValue="60"
+                      onChange={e => setNewTarget({...newTarget, refreshInterval: parseInt(e.target.value) || 0})}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-10 pt-8 border-t border-slate-50 flex gap-4">
+                <button onClick={() => setShowAddModal(false)} className="flex-1 py-4 bg-slate-50 text-slate-400 rounded-2xl font-bold hover:bg-slate-100 transition-all">Cancel</button>
+                <button onClick={addTarget} className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95">Start Monitoring</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

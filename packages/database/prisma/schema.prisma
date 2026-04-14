@@ -1,0 +1,29 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Target {
+  id              String    @id @default(uuid())
+  url             String
+  cookies         String    // JSON stringified cookies for this specific URL
+  refreshInterval Int       @default(60)
+  isActive        Boolean   @default(true)
+  status          String    @default("IDLE") // ACTIVE, EXPIRED, ERROR
+  lastRun         DateTime?
+  createdAt       DateTime  @default(now())
+  logs            ActivityLog[]
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  targetId  String
+  target    Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  level     String   // INFO, WARN, ERROR
+  message   String
+  timestamp DateTime @default(now())
+}
