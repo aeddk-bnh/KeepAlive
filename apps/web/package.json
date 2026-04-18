@@ -10,8 +10,7 @@
   "dependencies": {
     "@keepalive/shared-types": "*",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "react-router-dom": "^6.0.0"
+    "react-dom": "^18.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",

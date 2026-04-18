@@ -14,7 +14,7 @@
     "import": "tsx apps/api/src/cli/import.ts"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "rimraf": "^5.0.0"
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
   }
 }

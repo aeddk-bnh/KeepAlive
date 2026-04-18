@@ -8,6 +8,15 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173
   },
+  optimizeDeps: {
+    exclude: ['@novnc/novnc']
+  },
+  esbuild: {
+    target: 'esnext'
+  },
+  build: {
+    target: 'esnext'
+  },
   resolve: {
     alias: {
       '@keepalive/shared-types': path.resolve(__dirname, '../../packages/shared-types/src')

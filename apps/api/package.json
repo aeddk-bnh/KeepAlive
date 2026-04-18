@@ -10,15 +10,14 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "fastify": "^4.26.0",
     "@fastify/cors": "^8.0.0",
-    "@keepalive/database": "*",
     "@keepalive/browser-core": "*",
-    "@keepalive/shared-types": "*"
+    "@keepalive/database": "*",
+    "fastify": "^4.26.0"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.0.0"
   }
 }

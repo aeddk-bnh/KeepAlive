@@ -12,6 +12,13 @@ interface PersistentSession {
   page: Page;
 }
 
+export interface SessionSnapshot {
+  targetId: string;
+  url: string;
+  cookies: string;
+  timestamp: string;
+}
+
 const randomDelay = (min: number, max: number) => Math.floor(Math.random() * (max - min)) + min;
 
 export class BrowserService {
@@ -21,7 +28,8 @@ export class BrowserService {
   async init() {
     if (!this.browser) {
       this.browser = await chromium.launch({
-        headless: true
+        headless: true,
+        args: ['--no-sandbox', '--disable-dev-shm-usage']
       });
     }
   }
@@ -382,6 +390,36 @@ export class BrowserService {
       return { isExpired: false, isLoading: false, finalUrl };
     } catch (error: any) {
       return { isExpired: false, reason: `Navigation/Evaluation error: ${error.message}`, finalUrl: url };
+    }
+  }
+
+  async openSessionWindow(targetId: string): Promise<{ success: boolean; error?: string }> {
+    const session = this.sessions.get(targetId);
+    if (!session || session.page.isClosed()) {
+      return { success: false, error: 'Session not found or closed' };
+    }
+
+    try {
+      await session.page.bringToFront();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  async exportSessionSnapshot(targetId: string, url: string, cookiesJson: string): Promise<{ snapshot?: SessionSnapshot; error?: string }> {
+    try {
+      await this.getOrCreateSession(targetId, cookiesJson, url);
+      return {
+        snapshot: {
+          targetId,
+          url,
+          cookies: cookiesJson,
+          timestamp: new Date().toISOString()
+        }
+      };
+    } catch (err: any) {
+      return { error: err.message };
     }
   }
 
