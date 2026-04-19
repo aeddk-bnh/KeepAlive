@@ -2,6 +2,7 @@ export type TargetStatus = 'IDLE' | 'LOADING' | 'ACTIVE' | 'EXPIRED' | 'ERROR';
 
 export interface Target {
   id: string;
+  name?: string;
   url: string;
   cookies: string;
   refreshInterval: number;

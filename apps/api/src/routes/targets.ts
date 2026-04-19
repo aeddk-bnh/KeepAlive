@@ -14,9 +14,9 @@ export const targetsRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.post('/api/targets', async (request: any) => {
-    const { url, cookies, refreshInterval } = request.body;
+    const { name, url, cookies, refreshInterval } = request.body;
     return await db.target.create({
-      data: { url, cookies, refreshInterval: refreshInterval || 60 }
+      data: { name, url, cookies, refreshInterval: refreshInterval || 60 }
     });
   });
 

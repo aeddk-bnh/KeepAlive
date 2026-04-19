@@ -15,3 +15,8 @@ Dự án nhằm mục đích duy trì sự sống (KeepAlive) cho các trang web
 - **Browser Control:** Playwright hoặc Puppeteer (Playwright được ưu tiên vì hỗ trợ đa trình duyệt tốt hơn).
 - **Frontend:** React + Tailwind CSS (Vite).
 - **Storage:** SQLite hoặc JSON file (cho cấu hình URL & Cookie).
+
+## Phát hiện quan trọng (Đã xử lý)
+- Module Session Sync từng chỉ là static screenshot viewer do cấu trúc headless.
+- **Kiến trúc mới (Option B - noVNC Dockerized):** Hệ thống đã chuyển sang dùng VNC thực sự. Khi mở session, backend sẽ spawn riêng một màn hình ảo (Xvfb), VNC server (x11vnc), và WebSocket proxy (websockify) cho target đó. Playwright chạy ở chế độ `headless: false`. Frontend sử dụng iframe trỏ tới static app noVNC. Toàn bộ cần được chạy qua Docker để chứa các dependency về display.
+- **Tính năng mở rộng:** Cho phép cài đặt Extension từ Chrome Web Store, hỗ trợ đồng bộ Copy/Paste qua VNC (bằng autocutsel), và đổi tên (rename) Target trong giao diện quản lý.

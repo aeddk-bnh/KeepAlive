@@ -9,13 +9,14 @@ export const sessionSyncRoutes: FastifyPluginAsync = async (fastify) => {
     const target = await db.target.findUnique({ where: { id } });
     if (!target) return reply.code(404).send({ error: 'Target not found' });
 
-    await browserService.getOrCreateSession(id, target.cookies, target.url);
+    const session = await browserService.getOrCreateSession(id, target.cookies, target.url);
     const result = await browserService.openSessionWindow(id);
     if (!result.success) return reply.code(400).send({ error: result.error || 'Failed to open session' });
 
     return {
       success: true,
-      message: 'Session focused'
+      message: 'Session focused',
+      wsPort: session.wsPort
     };
   });
 

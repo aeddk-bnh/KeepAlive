@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "@fastify/cors": "^8.0.0",
+    "@fastify/websocket": "^8.3.1",
     "@keepalive/browser-core": "*",
     "@keepalive/database": "*",
     "fastify": "^4.26.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.7.0",
     "typescript": "^5.0.0"
   }

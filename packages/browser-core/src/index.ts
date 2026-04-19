@@ -1,4 +1,9 @@
-import { Browser, BrowserContext, chromium, Page, Dialog } from 'playwright';
+import { Browser, BrowserContext, Page, Dialog } from 'playwright';
+import { chromium } from 'playwright-extra';
+import stealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { spawn, ChildProcess } from 'child_process';
+
+chromium.use(stealthPlugin());
 
 export interface ExpiryResult {
   isExpired: boolean;
@@ -10,6 +15,9 @@ export interface ExpiryResult {
 interface PersistentSession {
   context: BrowserContext;
   page: Page;
+  vncPort: number;
+  wsPort: number;
+  processes: ChildProcess[];
 }
 
 export interface SessionSnapshot {
@@ -19,19 +27,23 @@ export interface SessionSnapshot {
   timestamp: string;
 }
 
+export interface VncConnectionInfo {
+  wsPort: number;
+}
+
+const VIEWPORT_WIDTH = 1280;
+const VIEWPORT_HEIGHT = 800;
+
 const randomDelay = (min: number, max: number) => Math.floor(Math.random() * (max - min)) + min;
 
 export class BrowserService {
-  private browser: Browser | null = null;
   private sessions: Map<string, PersistentSession> = new Map();
+  private nextDisplayNum = 100;
+  private nextVncPort = 5900;
+  private nextWsPort = 6080;
 
-  async init() {
-    if (!this.browser) {
-      this.browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-dev-shm-usage']
-      });
-    }
+  private delay(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async getOrCreateSession(targetId: string, cookiesJson: string, url: string): Promise<PersistentSession> {
@@ -40,10 +52,46 @@ export class BrowserService {
       if (!existingSession.page.isClosed()) {
         return existingSession;
       }
-      this.sessions.delete(targetId);
+      await this.closeSession(targetId);
     }
 
-    if (!this.browser) await this.init();
+    const displayNum = this.nextDisplayNum++;
+    const vncPort = this.nextVncPort++;
+    const wsPort = this.nextWsPort++;
+
+    const processes: ChildProcess[] = [];
+
+    const xvfb = spawn('Xvfb', [`:${displayNum}`, '-screen', '0', `${VIEWPORT_WIDTH}x${VIEWPORT_HEIGHT}x24`]);
+    processes.push(xvfb);
+    await this.delay(500);
+
+    const fluxbox = spawn('fluxbox', ['-display', `:${displayNum}`]);
+    processes.push(fluxbox);
+
+    const autocutselPrimary = spawn('autocutsel', ['-s', 'PRIMARY', '-display', `:${displayNum}`]);
+    processes.push(autocutselPrimary);
+
+    const autocutselClip = spawn('autocutsel', ['-s', 'CLIPBOARD', '-display', `:${displayNum}`]);
+    processes.push(autocutselClip);
+
+    const x11vnc = spawn('x11vnc', ['-display', `:${displayNum}`, '-nopw', '-forever', '-shared', '-rfbport', vncPort.toString()]);
+    processes.push(x11vnc);
+    await this.delay(500);
+
+    const websockify = spawn('websockify', [wsPort.toString(), `localhost:${vncPort}`]);
+    processes.push(websockify);
+
+    const userDataDir = `/tmp/playwright-profile-${targetId}`;
+
+    const context = await chromium.launchPersistentContext(userDataDir, {
+      headless: false,
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--window-position=0,0'],
+      ignoreDefaultArgs: ['--disable-extensions'],
+      env: { ...process.env, DISPLAY: `:${displayNum}` },
+      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      permissions: ['clipboard-read', 'clipboard-write'],
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+    });
 
     const rawCookies = JSON.parse(cookiesJson);
     const validSameSite = ['Strict', 'Lax', 'None'];
@@ -58,16 +106,8 @@ export class BrowserService {
       return { ...c, sameSite };
     });
 
-    // --- POPUP RESILIENCE: Grant all permissions to suppress browser prompts ---
-    const context = await this.browser!.newContext({
-      storageState: { cookies, origins: [] },
-      viewport: { width: 1280, height: 800 },
-      // Suppress browser-level permission dialogs (notifications, geolocation)
-      permissions: [],
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-    });
+    await context.addCookies(cookies);
 
-    // --- POPUP RESILIENCE: Auto-dismiss native browser dialogs ---
     context.on('dialog', async (dialog: Dialog) => {
       console.log(`[Popup Shield] Dismissed browser dialog: ${dialog.type()} - ${dialog.message().slice(0, 50)}`);
       if (dialog.type() === 'beforeunload') {
@@ -77,14 +117,12 @@ export class BrowserService {
       }
     });
 
-    const page = await context.newPage();
-
-    // --- POPUP RESILIENCE: Suppress console-based permission popups in some SPAs ---
+    const page = context.pages()[0] || await context.newPage();
     page.on('pageerror', () => { /* ignore JS errors from page */ });
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    const session = { context, page };
+    const session = { context, page, vncPort, wsPort, processes };
     this.sessions.set(targetId, session);
     return session;
   }
@@ -187,15 +225,22 @@ export class BrowserService {
 
   async takeScreenshot(targetId: string, url: string, cookiesJson: string): Promise<{ image: string; error?: string }> {
     try {
-      const session = await this.getOrCreateSession(targetId, cookiesJson, url);
-      // Try to dismiss popups before screenshot for a clean image
-      await this.dismissPopups(targetId);
-      await session.page.waitForTimeout(1000);
-      const image = (await session.page.screenshot({ type: 'jpeg', quality: 80 })).toString('base64');
+      await this.getOrCreateSession(targetId, cookiesJson, url);
+      const image = await this.captureSessionScreenshot(targetId);
       return { image };
     } catch (error: any) {
       return { image: '', error: error.message };
     }
+  }
+
+  async captureSessionScreenshot(targetId: string): Promise<string> {
+    const session = this.sessions.get(targetId);
+    if (!session || session.page.isClosed()) {
+      throw new Error('Session not found or closed');
+    }
+
+    await session.page.waitForTimeout(150);
+    return (await session.page.screenshot({ type: 'jpeg', quality: 80 })).toString('base64');
   }
 
   /**
@@ -426,21 +471,24 @@ export class BrowserService {
   async closeSession(targetId: string) {
     const session = this.sessions.get(targetId);
     if (session) {
-      await session.page.close();
-      await session.context.close();
+      try { await session.page.close(); } catch {}
+      try { await session.context.close(); } catch {}
+
+      for (const proc of session.processes) {
+        try {
+          proc.kill('SIGTERM');
+        } catch (e) {
+          // ignore kill errors
+        }
+      }
+
       this.sessions.delete(targetId);
     }
   }
 
   async close() {
-    if (this.browser) {
-      for (const session of this.sessions.values()) {
-        await session.page.close();
-        await session.context.close();
-      }
-      this.sessions.clear();
-      await this.browser.close();
-      this.browser = null;
+    for (const targetId of this.sessions.keys()) {
+      await this.closeSession(targetId);
     }
   }
 }

@@ -9,6 +9,7 @@ datasource db {
 
 model Target {
   id              String    @id @default(uuid())
+  name            String?
   url             String
   cookies         String    // JSON stringified cookies for this specific URL
   refreshInterval Int       @default(60)

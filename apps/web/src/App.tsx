@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-const API_URL = 'http://3.0.17.234:3001/api';
+const API_URL = `${window.location.protocol}//${window.location.hostname}:3001/api`;
+const WS_HOST = window.location.hostname;
 
 interface ActivityLog {
   id: string;
@@ -11,6 +12,7 @@ interface ActivityLog {
 
 interface Target {
   id: string;
+  name?: string;
   url: string;
   refreshInterval: number;
   isActive: boolean;
@@ -38,6 +40,7 @@ interface SessionSnapshot {
   timestamp?: string;
 }
 
+const IconPencil = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>;
 const IconPlus = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>;
 const IconTrash = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>;
 const IconPause = () => <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>;
@@ -65,7 +68,7 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast:
 const ContextMenu = ({ pos, target, actions, onClose }: { pos: ContextMenuPos; target: Target; actions: { label: string; icon: React.ReactNode; action: () => void; color?: string }[]; onClose: () => void }) => (
   <div className="fixed z-[160] bg-white/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-100 w-52 py-1.5" style={{ top: pos.y, left: pos.x }} onClick={(e) => e.stopPropagation()}>
     <div className="px-3 py-2 border-b border-slate-100">
-      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate">{target.url.replace(/^https?:\/\//, '')}</p>
+      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate">{target.name || target.url.replace(/^https?:\/\//, '')}</p>
     </div>
     {actions.map((item, i) => (
       <button key={i} onClick={() => { item.action(); onClose(); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold transition-colors ${item.color || 'text-slate-600 hover:bg-slate-50'}`}>
@@ -82,6 +85,7 @@ export default function App() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [showRenewModal, setShowRenewModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
   const [showScreenshotModal, setShowScreenshotModal] = useState(false);
 
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
@@ -89,12 +93,14 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [contextMenu, setContextMenu] = useState<ContextMenuPos | null>(null);
 
-  const [newTarget, setNewTarget] = useState({ url: '', cookies: '', refreshInterval: 60 });
+  const [newTarget, setNewTarget] = useState({ name: '', url: '', cookies: '', refreshInterval: 60 });
   const [renewData, setRenewData] = useState({ targetId: '', cookies: '' });
+  const [renameData, setRenameData] = useState({ targetId: '', name: '' });
 
   const [syncTargetId, setSyncTargetId] = useState('');
-  const [syncImage, setSyncImage] = useState<string | null>(null);
+  const [syncWsPort, setSyncWsPort] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'connecting' | 'live' | 'disconnected'>('idle');
   const [exportJson, setExportJson] = useState('');
   const [importJson, setImportJson] = useState('');
   const [newSessionForm, setNewSessionForm] = useState({ url: '', cookies: '', refreshInterval: 60, isActive: true });
@@ -129,11 +135,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (view !== 'sync' || !syncTargetId) return;
-    const interval = setInterval(() => {
-      fetchSyncScreenshot(syncTargetId, false);
-    }, 3000);
-    return () => clearInterval(interval);
+    if (view !== 'sync' || !syncTargetId) {
+      setSyncStatus('idle');
+      return;
+    }
   }, [view, syncTargetId]);
 
   const validateJsonArray = (str: string) => {
@@ -185,6 +190,25 @@ export default function App() {
     }
   };
 
+  const renameTarget = async () => {
+    if (!renameData.name) return showToast('Please enter a name', 'error');
+
+    const response = await fetch(`${API_URL}/targets/${renameData.targetId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: renameData.name })
+    });
+
+    if (response.ok) {
+      showToast('Target Renamed', 'success');
+      setShowRenameModal(false);
+      setRenameData({ targetId: '', name: '' });
+      fetchData();
+    } else {
+      showToast('Failed to rename target', 'error');
+    }
+  };
+
   const toggleTarget = async (id: string, currentStatus: boolean) => {
     const response = await fetch(`${API_URL}/targets/${id}`, {
       method: 'PUT',
@@ -203,7 +227,8 @@ export default function App() {
       showToast('Deleted', 'success');
       if (syncTargetId === id) {
         setSyncTargetId('');
-        setSyncImage(null);
+        setSyncWsPort(null);
+        setSyncStatus('idle');
       }
       fetchData();
     }
@@ -256,33 +281,30 @@ export default function App() {
   const openSyncForTarget = async (targetId: string) => {
     setView('sync');
     setSyncTargetId(targetId);
-    setSyncImage(null);
+    setSyncWsPort(null);
+    setSyncStatus('connecting');
+
     try {
+      setSyncBusy(true);
       const response = await fetch(`${API_URL}/session-sync/${targetId}/open`, { method: 'POST' });
       const data = await response.json();
-      if (!response.ok) return showToast(data.error || 'Failed to open session sync', 'error');
-      await fetchSyncScreenshot(targetId, true);
-      showToast('Session Sync opened', 'success');
-    } catch {
-      showToast('Failed to open session sync', 'error');
-    }
-  };
+      if (!response.ok) {
+        setSyncStatus('disconnected');
+        return showToast(data.error || 'Failed to open session sync', 'error');
+      }
 
-  const fetchSyncScreenshot = async (targetId: string, noisy = false) => {
-    try {
-      if (noisy) setSyncBusy(true);
-      const response = await fetch(`${API_URL}/session-sync/${targetId}/screenshot`, { method: 'POST' });
-      if (response.ok) {
-        const data = await response.json();
-        setSyncImage(data.image);
-      } else if (noisy) {
-        const err = await response.json();
-        showToast(err.error || 'Live view failed', 'error');
+      if (data.wsPort) {
+        setSyncWsPort(data.wsPort);
+        showToast('VNC target acquired, connecting...', 'info');
+      } else {
+        setSyncStatus('disconnected');
+        showToast('Backend did not provide wsPort', 'error');
       }
     } catch {
-      if (noisy) showToast('Network error', 'error');
+      setSyncStatus('disconnected');
+      showToast('Failed to open session sync', 'error');
     } finally {
-      if (noisy) setSyncBusy(false);
+      setSyncBusy(false);
     }
   };
 
@@ -334,6 +356,7 @@ export default function App() {
 
   const getContextActions = (target: Target) => [
     { label: 'Open Sync Module', icon: <IconSync />, action: () => openSyncForTarget(target.id), color: 'text-indigo-600 hover:bg-indigo-50' },
+    { label: 'Rename', icon: <IconPencil />, action: () => { setRenameData({ targetId: target.id, name: target.name || '' }); setShowRenameModal(true); }, color: 'text-indigo-600 hover:bg-indigo-50' },
     { label: 'Renew Session', icon: <IconKey />, action: () => { setRenewData({ targetId: target.id, cookies: '' }); setShowRenewModal(true); }, color: 'text-indigo-600 hover:bg-indigo-50' },
     { label: 'Screenshot', icon: <IconCamera />, action: () => takeScreenshot(target.id), color: 'text-slate-600 hover:bg-slate-50' },
     { label: 'Force Refresh', icon: <IconRefresh />, action: () => refreshTarget(target.id), color: 'text-emerald-600 hover:bg-emerald-50' },
@@ -393,7 +416,8 @@ export default function App() {
                   </div>
                 </div>
                 <div className="flex-1 mb-6">
-                  <h3 className="text-xl font-black text-slate-800 break-all line-clamp-2 leading-tight mb-2 group-hover:text-indigo-600 transition-colors" title={target.url}>{target.url.replace(/^https?:\/\/(www\.)?/, '')}</h3>
+                  <h3 className="text-xl font-black text-slate-800 break-all line-clamp-2 leading-tight mb-2 group-hover:text-indigo-600 transition-colors" title={target.url}>{target.name || target.url.replace(/^https?:\/\/(www\.)?/, '')}</h3>
+                  {target.name && <p className="text-[10px] text-slate-400 truncate" title={target.url}>{target.url.replace(/^https?:\/\//, '')}</p>}
                 </div>
                 <div className="bg-slate-50/50 rounded-2xl p-4 border border-slate-100 space-y-3">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex justify-between">Last Activity <span className="text-indigo-600">{target.lastRun ? new Date(target.lastRun).toLocaleTimeString() : 'N/A'}</span></p>
@@ -411,19 +435,29 @@ export default function App() {
                   <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Open / interact / export current session</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <select value={syncTargetId} onChange={(e) => setSyncTargetId(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 min-w-[260px]">
+                  <select value={syncTargetId} onChange={(e) => {
+                    setSyncWsPort(null);
+                    setSyncStatus('idle');
+                    setSyncTargetId(e.target.value);
+                  }} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 min-w-[260px]">
                     <option value="">Select session...</option>
-                    {targets.map(t => <option key={t.id} value={t.id}>{t.url.replace(/^https?:\/\//, '')}</option>)}
+                    {targets.map(t => <option key={t.id} value={t.id}>{t.name || t.url.replace(/^https?:\/\//, '')}</option>)}
                   </select>
                   <button onClick={() => syncTargetId && openSyncForTarget(syncTargetId)} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2"><IconSync /> Open</button>
                 </div>
               </div>
 
-              <div className="rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 min-h-[460px] flex items-center justify-center relative">
+              <div
+                className="rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 min-h-[460px] flex items-center justify-center relative outline-none"
+              >
                 {syncBusy ? (
-                  <div className="flex flex-col items-center gap-3 py-16"><div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div><p className="text-xs font-black uppercase tracking-widest text-slate-400">Opening session...</p></div>
-                ) : syncImage ? (
-                  <img src={`data:image/jpeg;base64,${syncImage}`} alt="Live session" className="w-full h-auto object-contain" />
+                  <div className="flex flex-col items-center gap-3 py-16"><div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div><p className="text-xs font-black uppercase tracking-widest text-slate-400">Connecting VNC...</p></div>
+                ) : syncWsPort ? (
+                  <iframe
+                    src={`/novnc/vnc.html?host=${WS_HOST}&port=${syncWsPort}&scale=true`}
+                    className="w-full h-full min-h-[460px] border-none"
+                    title="VNC Viewer"
+                  />
                 ) : (
                   <div className="text-center px-8"><p className="text-lg font-black text-slate-500">No live session selected</p><p className="text-xs mt-2 font-bold uppercase tracking-widest text-slate-400">Choose a target and click Open</p></div>
                 )}
@@ -488,10 +522,22 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-600 via-violet-500 to-fuchsia-500"></div>
               <div className="flex justify-between items-center mb-8"><div><h2 className="text-3xl font-black tracking-tight text-slate-800">Add Target</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">URL & Cookies Combined</p></div><button onClick={() => setShowAddModal(false)} className="w-10 h-10 flex items-center justify-center bg-slate-50 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"><IconX /></button></div>
               <div className="space-y-6">
+                <div><label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2">Target Name (Optional)</label><input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-5 py-3.5 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-bold text-slate-700" placeholder="My Account 1" onChange={e => setNewTarget({...newTarget, name: e.target.value})} /></div>
                 <div><label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2">Website URL</label><input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-5 py-3.5 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-bold text-slate-700" placeholder="https://facebook.com/..." onChange={e => setNewTarget({...newTarget, url: e.target.value})} /></div>
                 <div><label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2 flex justify-between"><span>Cookie JSON Array</span><span className="text-indigo-400">Paste directly from EditThisCookie</span></label><textarea className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-5 py-3.5 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-mono text-xs text-slate-700 h-32 resize-none" placeholder='[{"domain": ".facebook.com", "name": "c_user", ...}]' onChange={e => setNewTarget({...newTarget, cookies: e.target.value})} /></div>
               </div>
               <div className="mt-8 flex gap-3"><button onClick={() => setShowAddModal(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-400 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button><button onClick={addTarget} className="flex-[2] py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-200 hover:shadow-xl hover:scale-[1.02] transition-all">Start Monitoring</button></div>
+            </div>
+          </div>
+        )}
+
+        {showRenameModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 z-[150]">
+            <div className="bg-white/95 rounded-[2.5rem] shadow-[0_32px_120px_rgba(0,0,0,0.25)] p-10 w-full max-w-xl border border-white/50 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-600 via-violet-500 to-fuchsia-500"></div>
+              <div className="flex justify-between items-center mb-8"><div><h2 className="text-3xl font-black tracking-tight text-slate-800">Rename Target</h2><p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1">Set a custom display name</p></div><button onClick={() => setShowRenameModal(false)} className="w-10 h-10 flex items-center justify-center bg-slate-50 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all"><IconX /></button></div>
+              <div className="space-y-6"><div><label className="block text-[9px] font-black text-slate-400 uppercase tracking-[0.3em] mb-2">New Name</label><input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl px-5 py-3.5 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-bold text-slate-700" placeholder="My Account 1" value={renameData.name} onChange={e => setRenameData({...renameData, name: e.target.value})} /></div></div>
+              <div className="mt-8 flex gap-3"><button onClick={() => setShowRenameModal(false)} className="flex-1 py-3.5 bg-slate-100 text-slate-400 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button><button onClick={renameTarget} className="flex-[2] py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-200 hover:shadow-xl hover:scale-[1.02] transition-all">Save</button></div>
             </div>
           </div>
         )}

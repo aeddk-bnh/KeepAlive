@@ -8,9 +8,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces --if-present",
+    "dev": "npm run dev --workspace @keepalive/api & npm run dev --workspace @keepalive/web",
     "build": "npm run build --workspaces --if-present",
-    "start": "npm run start --workspaces --if-present",
+    "start": "npm run start --workspace @keepalive/api & npm run start --workspace @keepalive/web",
     "import": "tsx apps/api/src/cli/import.ts"
   },
   "devDependencies": {
