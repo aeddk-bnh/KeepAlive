@@ -17,7 +17,10 @@ interface PersistentSession {
   page: Page;
   vncPort: number;
   wsPort: number;
-  processes: ChildProcess[];
+  displayNum: number;
+  processes: ChildProcess[]; // Base processes: Xvfb, fluxbox, autocutsel
+  vncProcesses: ChildProcess[]; // On-demand: x11vnc, websockify
+  vncTimeout?: NodeJS.Timeout;
 }
 
 export interface SessionSnapshot {
@@ -75,11 +78,8 @@ export class BrowserService {
     processes.push(autocutselClip);
 
     const x11vnc = spawn('x11vnc', ['-display', `:${displayNum}`, '-nopw', '-forever', '-shared', '-rfbport', vncPort.toString()]);
-    processes.push(x11vnc);
-    await this.delay(500);
-
     const websockify = spawn('websockify', [wsPort.toString(), `localhost:${vncPort}`]);
-    processes.push(websockify);
+    const vncProcesses = [x11vnc, websockify];
 
     const userDataDir = `/tmp/playwright-profile-${targetId}`;
 
@@ -121,9 +121,47 @@ export class BrowserService {
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    const session = { context, page, vncPort, wsPort, processes };
+    const session: PersistentSession = { context, page, vncPort, wsPort, displayNum, processes, vncProcesses: [] };
     this.sessions.set(targetId, session);
+
+    // Initial VNC start
+    this.startVncForSession(targetId);
+
     return session;
+  }
+
+  public startVncForSession(targetId: string) {
+    const session = this.sessions.get(targetId);
+    if (!session) return;
+
+    if (session.vncTimeout) {
+      clearTimeout(session.vncTimeout);
+    }
+
+    if (session.vncProcesses.length === 0) {
+      console.log(`[VNC] Starting x11vnc and websockify for target ${targetId}`);
+      const x11vnc = spawn('x11vnc', ['-display', `:${session.displayNum}`, '-nopw', '-forever', '-shared', '-rfbport', session.vncPort.toString()]);
+      const websockify = spawn('websockify', [session.wsPort.toString(), `localhost:${session.vncPort}`]);
+      session.vncProcesses.push(x11vnc, websockify);
+    }
+
+    // Set timeout to kill VNC after 5 minutes of no heartbeat
+    session.vncTimeout = setTimeout(() => {
+      this.stopVncForSession(targetId);
+    }, 5 * 60 * 1000);
+  }
+
+  private stopVncForSession(targetId: string) {
+    const session = this.sessions.get(targetId);
+    if (!session) return;
+
+    if (session.vncProcesses.length > 0) {
+      console.log(`[VNC] Stopping x11vnc and websockify for target ${targetId} to free memory`);
+      for (const proc of session.vncProcesses) {
+        try { proc.kill('SIGTERM'); } catch (e) {}
+      }
+      session.vncProcesses = [];
+    }
   }
 
   private getActivePage(session: PersistentSession): Page | null {
@@ -493,6 +531,9 @@ export class BrowserService {
   async closeSession(targetId: string) {
     const session = this.sessions.get(targetId);
     if (session) {
+      if (session.vncTimeout) clearTimeout(session.vncTimeout);
+      this.stopVncForSession(targetId);
+
       try { await session.page.close(); } catch {}
       try { await session.context.close(); } catch {}
 

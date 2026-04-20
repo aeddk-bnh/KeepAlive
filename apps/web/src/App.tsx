@@ -140,6 +140,12 @@ export default function App() {
       setSyncStatus('idle');
       return;
     }
+
+    const keepaliveInterval = setInterval(() => {
+      fetch(`${API_URL}/session-sync/${syncTargetId}/keepalive-vnc`, { method: 'POST' }).catch(() => {});
+    }, 60000);
+
+    return () => clearInterval(keepaliveInterval);
   }, [view, syncTargetId]);
 
   const validateJsonArray = (str: string) => {

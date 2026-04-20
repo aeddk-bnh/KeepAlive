@@ -20,6 +20,12 @@ export const sessionSyncRoutes: FastifyPluginAsync = async (fastify) => {
     };
   });
 
+  fastify.post('/api/session-sync/:id/keepalive-vnc', async (request: any, reply: any) => {
+    const { id } = request.params;
+    browserService.startVncForSession(id);
+    return { success: true };
+  });
+
   fastify.get('/api/session-sync/:id/export', async (request: any, reply: any) => {
     const { id } = request.params;
     const target = await db.target.findUnique({ where: { id } });
