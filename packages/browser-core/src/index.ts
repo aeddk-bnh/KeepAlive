@@ -221,28 +221,7 @@ export class BrowserService {
       }
     } catch { /* ignore */ }
 
-    // === TIER 3: Click × character text inside buttons ===
-    try {
-      // Find buttons containing the × (multiplication sign) or ✕ character
-      const xButtons = await page.$$('button, a, span, div');
-      for (const el of xButtons.slice(0, 50)) { // limit to first 50 elements
-        try {
-          const text = await el.textContent();
-          const isSmall = text && text.trim().length <= 3;
-          if (isSmall && (text.includes('\u00d7') || text.includes('\u2715') || text.includes('\u2716'))) {
-            const isVisible = await el.isVisible();
-            if (isVisible) {
-              await el.click({ timeout: 1000 });
-              dismissedAny = true;
-              await page.waitForTimeout(randomDelay(200, 400));
-              break; // only close one to avoid misclicks
-            }
-          }
-        } catch { /* skip */ }
-      }
-    } catch { /* ignore */ }
-
-    // === TIER 4: Dismiss cookie/consent banners (click Accept/Reject/OK — safe) ===
+    // === TIER 3: Dismiss cookie/consent banners (click Accept/Reject/OK — safe) ===
     try {
       const acceptSelectors = [
         'button[id*="accept"]',
@@ -303,6 +282,12 @@ export class BrowserService {
     if (!session) {
       return { success: false, reason: 'Session not found' };
     }
+
+    // Do not interfere with user activity if VNC is currently active
+    if (session.vncProcesses.length > 0) {
+      return { success: true, reason: 'VNC is active, skipping simulation to avoid interference' };
+    }
+
     const page = this.getActivePage(session);
     if (!page) {
       return { success: false, reason: 'No active pages in session' };
@@ -322,46 +307,7 @@ export class BrowserService {
       await page.mouse.move(endX, endY, { steps: randomDelay(15, 30) });
       await page.waitForTimeout(randomDelay(400, 1000));
 
-      // === Step 2: Find a SAFE text input to type in ===
-      let safeInput = await this.findSafeInput(page);
-
-      if (safeInput) {
-        try {
-          // Scroll the element into view first (in case popup pushed it down)
-          await safeInput.scrollIntoViewIfNeeded({ timeout: 3000 });
-
-          // Click to focus
-          await safeInput.click({ timeout: 2000 });
-          await page.waitForTimeout(randomDelay(150, 350));
-
-          // Triple-click to select all existing text
-          await safeInput.click({ clickCount: 3, timeout: 2000 });
-          await page.waitForTimeout(randomDelay(150, 350));
-
-          // Type "keepalive" then delete it
-          const testText = 'keepalive';
-          await safeInput.type(testText, { delay: randomDelay(60, 140) });
-          await page.waitForTimeout(randomDelay(300, 700));
-
-          // Delete character by character
-          for (let i = 0; i < testText.length; i++) {
-            await page.keyboard.press('Backspace', { delay: randomDelay(40, 90) });
-          }
-
-          // Click somewhere neutral (top-left of page, outside any popup area)
-          await page.mouse.click(30, 30);
-          await page.waitForTimeout(randomDelay(200, 500));
-        } catch (err: any) {
-          // If a popup intercepted the click, try Escape + retry once
-          try {
-            await page.keyboard.press('Escape');
-            await page.waitForTimeout(randomDelay(500, 1000));
-            // Skip typing this cycle — scroll is enough to keep session
-          } catch { /* give up on typing */ }
-        }
-      }
-
-      // === Step 3: Natural scrolling (use page.evaluate for reliable scroll even with overlays) ===
+      // === Step 2: Natural scrolling (use page.evaluate for reliable scroll even with overlays) ===
       try {
         const scrollAmount = randomDelay(150, 400);
         const direction = Math.random() > 0.5 ? 1 : -1;
