@@ -26,6 +26,11 @@ export class SessionWatcher {
       });
 
       for (const target of activeTargets) {
+        // MEMORY OPTIMIZATION: Skip expired sessions to prevent launching browsers endlessly
+        if (target.status === 'EXPIRED') {
+          continue;
+        }
+
         if (target.status === 'LOADING') {
           hasLoadingTargets = true;
         }
@@ -92,6 +97,9 @@ export class SessionWatcher {
           where: { id: target.id },
           data: { status: 'EXPIRED', lastRun: now }
         });
+
+        // MEMORY OPTIMIZATION: Kill the browser and Xvfb process to free RAM
+        await browserService.closeSession(target.id);
 
         await db.activityLog.create({
           data: {
