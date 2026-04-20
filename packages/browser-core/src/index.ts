@@ -85,10 +85,10 @@ export class BrowserService {
 
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--window-position=0,0'],
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--window-position=0,0', `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`, '--start-maximized'],
       ignoreDefaultArgs: ['--disable-extensions'],
       env: { ...process.env, DISPLAY: `:${displayNum}` },
-      viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
+      viewport: null, // Allow viewport to fill window so the tab bar is visible without scrolling
       permissions: ['clipboard-read', 'clipboard-write']
     });
 

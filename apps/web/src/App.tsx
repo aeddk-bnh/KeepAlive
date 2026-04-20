@@ -457,21 +457,21 @@ export default function App() {
               </div>
 
               <div
-                className="rounded-2xl overflow-hidden bg-slate-100 border border-slate-200 min-h-[460px] flex items-center justify-center relative outline-none"
+                className="rounded-2xl overflow-hidden bg-slate-50 border border-slate-200 aspect-[16/10] w-full flex items-center justify-center relative outline-none"
               >
                 {syncBusy ? (
                   <div className="flex flex-col items-center gap-3 py-16"><div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div><p className="text-xs font-black uppercase tracking-widest text-slate-400">Connecting VNC...</p></div>
                 ) : syncWsPort ? (
-                  <div className="w-full h-full min-h-[460px] relative bg-slate-950">
+                  <div className="w-full h-full relative bg-slate-50">
                     <iframe
                       key={syncViewerKey}
                       src={`/novnc/vnc.html?host=${WS_HOST}&port=${syncWsPort}&resize=scale&view_only=0&autoconnect=1`}
-                      className="absolute inset-0 w-full h-full border-none"
+                      className="absolute inset-0 w-full h-full border-none bg-transparent"
                       title="VNC Viewer"
                     />
                   </div>
                 ) : (
-                  <div className="text-center px-8"><p className="text-lg font-black text-slate-500">No live session selected</p><p className="text-xs mt-2 font-bold uppercase tracking-widest text-slate-400">Choose a target and click Open</p></div>
+                  <div className="text-center px-8 bg-slate-50 w-full h-full flex flex-col items-center justify-center"><p className="text-lg font-black text-slate-500">No live session selected</p><p className="text-xs mt-2 font-bold uppercase tracking-widest text-slate-400">Choose a target and click Open</p></div>
                 )}
               </div>
             </div>
