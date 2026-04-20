@@ -96,6 +96,7 @@ export default function App() {
   const [newTarget, setNewTarget] = useState({ name: '', url: '', cookies: '', refreshInterval: 60 });
   const [renewData, setRenewData] = useState({ targetId: '', cookies: '' });
   const [renameData, setRenameData] = useState({ targetId: '', name: '' });
+  const [syncViewerKey, setSyncViewerKey] = useState(0);
 
   const [syncTargetId, setSyncTargetId] = useState('');
   const [syncWsPort, setSyncWsPort] = useState<number | null>(null);
@@ -163,7 +164,7 @@ export default function App() {
     if (response.ok) {
       showToast('Target Added', 'success');
       setShowAddModal(false);
-      setNewTarget({ url: '', cookies: '', refreshInterval: 60 });
+      setNewTarget({ name: '', url: '', cookies: '', refreshInterval: 60 });
       fetchData();
     } else {
       showToast('Failed to add target', 'error');
@@ -295,6 +296,8 @@ export default function App() {
 
       if (data.wsPort) {
         setSyncWsPort(data.wsPort);
+        setSyncViewerKey(prev => prev + 1);
+        setSyncStatus('live');
         showToast('VNC target acquired, connecting...', 'info');
       } else {
         setSyncStatus('disconnected');
@@ -453,11 +456,14 @@ export default function App() {
                 {syncBusy ? (
                   <div className="flex flex-col items-center gap-3 py-16"><div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div><p className="text-xs font-black uppercase tracking-widest text-slate-400">Connecting VNC...</p></div>
                 ) : syncWsPort ? (
-                  <iframe
-                    src={`/novnc/vnc.html?host=${WS_HOST}&port=${syncWsPort}&scale=true`}
-                    className="w-full h-full min-h-[460px] border-none"
-                    title="VNC Viewer"
-                  />
+                  <div className="w-full h-full min-h-[460px] relative bg-slate-950">
+                    <iframe
+                      key={syncViewerKey}
+                      src={`/novnc/vnc.html?host=${WS_HOST}&port=${syncWsPort}&resize=scale&view_only=0&autoconnect=1`}
+                      className="absolute inset-0 w-full h-full border-none"
+                      title="VNC Viewer"
+                    />
+                  </div>
                 ) : (
                   <div className="text-center px-8"><p className="text-lg font-black text-slate-500">No live session selected</p><p className="text-xs mt-2 font-bold uppercase tracking-widest text-slate-400">Choose a target and click Open</p></div>
                 )}

@@ -49,7 +49,7 @@ export class BrowserService {
   async getOrCreateSession(targetId: string, cookiesJson: string, url: string): Promise<PersistentSession> {
     if (this.sessions.has(targetId)) {
       const existingSession = this.sessions.get(targetId)!;
-      if (!existingSession.page.isClosed()) {
+      if (existingSession.context.pages().length > 0) {
         return existingSession;
       }
       await this.closeSession(targetId);
@@ -89,8 +89,7 @@ export class BrowserService {
       ignoreDefaultArgs: ['--disable-extensions'],
       env: { ...process.env, DISPLAY: `:${displayNum}` },
       viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
-      permissions: ['clipboard-read', 'clipboard-write'],
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      permissions: ['clipboard-read', 'clipboard-write']
     });
 
     const rawCookies = JSON.parse(cookiesJson);
@@ -127,6 +126,11 @@ export class BrowserService {
     return session;
   }
 
+  private getActivePage(session: PersistentSession): Page | null {
+    const pages = session.context.pages();
+    return pages.length > 0 ? pages[0] : null;
+  }
+
   /**
    * TIER 1: Escape key — dismisses most modals/overlays without side effects.
    * TIER 2: Close button detection — finds ×/X/close buttons and clicks them.
@@ -135,11 +139,14 @@ export class BrowserService {
    */
   async dismissPopups(targetId: string): Promise<{ dismissed: boolean; reason?: string }> {
     const session = this.sessions.get(targetId);
-    if (!session || session.page.isClosed()) {
+    if (!session) {
       return { dismissed: false, reason: 'Session not found' };
     }
+    const page = this.getActivePage(session);
+    if (!page) {
+      return { dismissed: false, reason: 'No active pages in session' };
+    }
 
-    const { page } = session;
     let dismissedAny = false;
 
     // === TIER 1: Press Escape (safe, dismisses 80% of modals) ===
@@ -235,12 +242,16 @@ export class BrowserService {
 
   async captureSessionScreenshot(targetId: string): Promise<string> {
     const session = this.sessions.get(targetId);
-    if (!session || session.page.isClosed()) {
-      throw new Error('Session not found or closed');
+    if (!session) {
+      throw new Error('Session not found');
+    }
+    const page = this.getActivePage(session);
+    if (!page) {
+      throw new Error('No active pages in session');
     }
 
-    await session.page.waitForTimeout(150);
-    return (await session.page.screenshot({ type: 'jpeg', quality: 80 })).toString('base64');
+    await page.waitForTimeout(150);
+    return (await page.screenshot({ type: 'jpeg', quality: 80 })).toString('base64');
   }
 
   /**
@@ -251,11 +262,13 @@ export class BrowserService {
    */
   async simulateHumanActivity(targetId: string): Promise<{ success: boolean; reason?: string }> {
     const session = this.sessions.get(targetId);
-    if (!session || session.page.isClosed()) {
-      return { success: false, reason: 'Session not found or closed' };
+    if (!session) {
+      return { success: false, reason: 'Session not found' };
     }
-
-    const { page } = session;
+    const page = this.getActivePage(session);
+    if (!page) {
+      return { success: false, reason: 'No active pages in session' };
+    }
 
     try {
       // === POPUP RESILIENCE: Clean up before activity ===
@@ -381,15 +394,20 @@ export class BrowserService {
   async checkSession(targetId: string, url: string, cookiesJson: string, forceReload: boolean = false): Promise<ExpiryResult> {
     try {
       const session = await this.getOrCreateSession(targetId, cookiesJson, url);
+      const page = this.getActivePage(session);
 
-      if (forceReload) {
-        await session.page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
-        await session.page.waitForTimeout(5000);
-      } else {
-        await session.page.waitForTimeout(1000);
+      if (!page) {
+        return { isExpired: false, reason: 'No active pages in session', finalUrl: url };
       }
 
-      const finalUrl = session.page.url();
+      if (forceReload) {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.waitForTimeout(5000);
+      } else {
+        await page.waitForTimeout(1000);
+      }
+
+      const finalUrl = page.url();
       let urlObj;
       try {
         urlObj = new URL(finalUrl);
@@ -407,7 +425,7 @@ export class BrowserService {
         return { isExpired: true, reason: `Redirected to login: ${finalUrl}`, finalUrl };
       }
 
-      const bodyText = await session.page.innerText('body');
+      const bodyText = await page.innerText('body');
       const expiryTextPatterns = ['Session expired', 'Please log in', 'Your session has timed out', 'Please sign in'];
       const hasExpiryText = expiryTextPatterns.some(pattern => bodyText.includes(pattern));
 
@@ -415,9 +433,9 @@ export class BrowserService {
         return { isExpired: true, reason: 'Found expiry text on page', finalUrl };
       }
 
-      const hasPasswordField = await session.page.$('input[type="password"]');
-      const hasEmailField = await session.page.$('input[type="email"], input[name*="user" i], input[name*="login" i], input[name*="email" i]');
-      const hasLoginButton = await session.page.$('button[type="submit"], input[type="submit"], button[name*="login" i], button[class*="login" i]');
+      const hasPasswordField = await page.$('input[type="password"]');
+      const hasEmailField = await page.$('input[type="email"], input[name*="user" i], input[name*="login" i], input[name*="email" i]');
+      const hasLoginButton = await page.$('button[type="submit"], input[type="submit"], button[name*="login" i], button[class*="login" i]');
 
       if (hasPasswordField && (hasEmailField || hasLoginButton)) {
         return { isExpired: true, reason: 'Found login form', finalUrl };
@@ -425,7 +443,7 @@ export class BrowserService {
 
       if (urlObj.hostname && urlObj.hostname.endsWith('github.dev')) {
         const isConnecting = bodyText.includes('Connecting to your codespace') || bodyText.includes('Setting up your codespace');
-        const hasEditor = await session.page.$('.monaco-workbench');
+        const hasEditor = await page.$('.monaco-workbench');
 
         if (isConnecting || !hasEditor) {
           return { isExpired: false, isLoading: true, reason: 'Codespace is booting (workbench not ready)', finalUrl };
@@ -440,12 +458,16 @@ export class BrowserService {
 
   async openSessionWindow(targetId: string): Promise<{ success: boolean; error?: string }> {
     const session = this.sessions.get(targetId);
-    if (!session || session.page.isClosed()) {
-      return { success: false, error: 'Session not found or closed' };
+    if (!session) {
+      return { success: false, error: 'Session not found' };
+    }
+    const page = this.getActivePage(session);
+    if (!page) {
+      return { success: false, error: 'No active pages in session' };
     }
 
     try {
-      await session.page.bringToFront();
+      await page.bringToFront();
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
