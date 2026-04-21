@@ -10,6 +10,7 @@ export const sessionSyncRoutes: FastifyPluginAsync = async (fastify) => {
     if (!target) return reply.code(404).send({ error: 'Target not found' });
 
     const session = await browserService.getOrCreateSession(id, target.cookies, target.url);
+    browserService.startVncForSession(id);
     const result = await browserService.openSessionWindow(id);
     if (!result.success) return reply.code(400).send({ error: result.error || 'Failed to open session' });
 

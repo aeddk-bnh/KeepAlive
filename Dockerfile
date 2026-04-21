@@ -5,16 +5,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     xvfb \
     x11vnc \
-    fluxbox \
     websockify \
     net-tools \
     autocutsel \
     && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p ~/.fluxbox && \
-    echo "session.screen0.toolbar.visible: false" > ~/.fluxbox/init && \
-    echo "session.screen0.defaultDeco: NONE" >> ~/.fluxbox/init && \
-    echo "[app] (all) [Deco] {NONE} [Maximized] {yes} [Layer] {2} [end]" > ~/.fluxbox/apps
 
 WORKDIR /app
 

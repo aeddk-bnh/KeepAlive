@@ -18,5 +18,5 @@ Dự án nhằm mục đích duy trì sự sống (KeepAlive) cho các trang web
 
 ## Phát hiện quan trọng (Đã xử lý)
 - Module Session Sync từng chỉ là static screenshot viewer do cấu trúc headless.
-- **Kiến trúc mới (Option B - noVNC Dockerized):** Hệ thống đã chuyển sang dùng VNC thực sự. Khi mở session, backend sẽ spawn riêng một màn hình ảo (Xvfb), VNC server (x11vnc), và WebSocket proxy (websockify) cho target đó. Playwright chạy ở chế độ `headless: false`. Frontend sử dụng iframe trỏ tới static app noVNC. Toàn bộ cần được chạy qua Docker để chứa các dependency về display.
-- **Tính năng mở rộng:** Cho phép cài đặt Extension từ Chrome Web Store, hỗ trợ đồng bộ Copy/Paste qua VNC (bằng autocutsel), và đổi tên (rename) Target trong giao diện quản lý.
+- **Kiến trúc mới (Option B - noVNC Dockerized):** Hệ thống đã chuyển sang dùng VNC thực sự. Mỗi target có một màn hình ảo Xvfb riêng. Khi user mở Session Sync, backend mới bật `autocutsel`, `x11vnc` và `websockify` theo kiểu on-demand; khi ngừng xem quá 5 phút thì các process VNC sẽ tự tắt để giảm RAM. Playwright chạy ở chế độ `headless: false`. Frontend sử dụng iframe trỏ tới static app noVNC. Toàn bộ cần được chạy qua Docker để chứa các dependency về display.
+- **Tính năng mở rộng:** Cho phép cài đặt Extension từ Chrome Web Store, hỗ trợ đồng bộ Copy/Paste qua VNC (bằng autocutsel on-demand), và đổi tên (rename) Target trong giao diện quản lý.

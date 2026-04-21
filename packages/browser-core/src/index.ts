@@ -18,8 +18,8 @@ interface PersistentSession {
   vncPort: number;
   wsPort: number;
   displayNum: number;
-  processes: ChildProcess[]; // Base processes: Xvfb, fluxbox, autocutsel
-  vncProcesses: ChildProcess[]; // On-demand: x11vnc, websockify
+  processes: ChildProcess[]; // Base processes: Xvfb only
+  vncProcesses: ChildProcess[]; // On-demand: autocutsel, x11vnc, websockify
   vncTimeout?: NodeJS.Timeout;
 }
 
@@ -68,27 +68,16 @@ export class BrowserService {
     processes.push(xvfb);
     await this.delay(500);
 
-    const fluxbox = spawn('fluxbox', ['-display', `:${displayNum}`]);
-    processes.push(fluxbox);
-
-    const autocutselPrimary = spawn('autocutsel', ['-s', 'PRIMARY', '-display', `:${displayNum}`]);
-    processes.push(autocutselPrimary);
-
-    const autocutselClip = spawn('autocutsel', ['-s', 'CLIPBOARD', '-display', `:${displayNum}`]);
-    processes.push(autocutselClip);
-
-    const x11vnc = spawn('x11vnc', ['-display', `:${displayNum}`, '-nopw', '-forever', '-shared', '-rfbport', vncPort.toString()]);
-    const websockify = spawn('websockify', [wsPort.toString(), `localhost:${vncPort}`]);
-    const vncProcesses = [x11vnc, websockify];
+    const vncProcesses: ChildProcess[] = [];
 
     const userDataDir = `/tmp/playwright-profile-${targetId}`;
 
     const context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--window-position=0,0', `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`, '--start-maximized'],
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--window-position=0,0', `--window-size=${VIEWPORT_WIDTH},${VIEWPORT_HEIGHT}`],
       ignoreDefaultArgs: ['--disable-extensions'],
       env: { ...process.env, DISPLAY: `:${displayNum}` },
-      viewport: null, // Allow viewport to fill window so the tab bar is visible without scrolling
+      viewport: null,
       permissions: ['clipboard-read', 'clipboard-write']
     });
 
@@ -121,12 +110,8 @@ export class BrowserService {
 
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    const session: PersistentSession = { context, page, vncPort, wsPort, displayNum, processes, vncProcesses: [] };
+    const session: PersistentSession = { context, page, vncPort, wsPort, displayNum, processes, vncProcesses };
     this.sessions.set(targetId, session);
-
-    // Initial VNC start
-    this.startVncForSession(targetId);
-
     return session;
   }
 
@@ -139,10 +124,12 @@ export class BrowserService {
     }
 
     if (session.vncProcesses.length === 0) {
-      console.log(`[VNC] Starting x11vnc and websockify for target ${targetId}`);
+      console.log(`[VNC] Starting autocutsel, x11vnc and websockify for target ${targetId}`);
+      const autocutselPrimary = spawn('autocutsel', ['-s', 'PRIMARY', '-display', `:${session.displayNum}`]);
+      const autocutselClip = spawn('autocutsel', ['-s', 'CLIPBOARD', '-display', `:${session.displayNum}`]);
       const x11vnc = spawn('x11vnc', ['-display', `:${session.displayNum}`, '-nopw', '-forever', '-shared', '-rfbport', session.vncPort.toString()]);
       const websockify = spawn('websockify', [session.wsPort.toString(), `localhost:${session.vncPort}`]);
-      session.vncProcesses.push(x11vnc, websockify);
+      session.vncProcesses.push(autocutselPrimary, autocutselClip, x11vnc, websockify);
     }
 
     // Set timeout to kill VNC after 5 minutes of no heartbeat

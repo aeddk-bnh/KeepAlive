@@ -35,7 +35,7 @@ KeepAlive/
 ```
 
 ## Thành phần chính
-1. **Browser Engine (`browser-core`):** Quản lý các phiên làm việc trình duyệt ở chế độ `headless: false` trên các virtual display riêng biệt (Xvfb). Khởi tạo `websockify` và `x11vnc` cho từng phiên để hỗ trợ kết nối noVNC.
+1. **Browser Engine (`browser-core`):** Quản lý các phiên làm việc trình duyệt ở chế độ `headless: false` trên các virtual display riêng biệt (Xvfb). `x11vnc`, `websockify` và `autocutsel` chỉ được khởi tạo theo nhu cầu khi user mở Session Sync, sau đó tự tắt nếu không còn heartbeat từ UI.
 2. **Scheduler (`sessionWatcher`):** Chạy ngầm trong `api`, kiểm tra định kỳ (polling/refresh) và mô phỏng hành vi người dùng bằng Playwright để giữ phiên đăng nhập.
 3. **API Gateway (`api`):** Cung cấp REST API cho Dashboard, khởi tạo luồng VNC và quản lý cấu hình các URL/Cookies.
 4. **Dashboard (`web`):** Giao diện quản lý trạng thái các mục tiêu (targets) và hiển thị iframe noVNC để tương tác trực tiếp với các phiên đang chạy.
